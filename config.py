@@ -4,6 +4,7 @@
 """
 import json
 import os
+import sys
 from pathlib import Path
 from typing import List
 
@@ -39,8 +40,21 @@ class Config:
         
         # 配置文件保存在项目目录下
         if config_dir is None:
-            # 获取项目目录（main.py所在目录）
-            config_dir = Path(__file__).parent
+            # 获取项目目录
+            # 对于 Nuitka 打包后的单文件，sys.argv[0] 指向实际的可执行文件路径
+            # 对于开发模式，使用脚本所在目录
+            if sys.argv and sys.argv[0]:
+                exe_path = Path(sys.argv[0]).resolve()
+                # 如果是 .exe 文件，使用其所在目录（Nuitka 单文件模式）
+                if exe_path.suffix.lower() == '.exe':
+                    config_dir = exe_path.parent
+                else:
+                    # 开发模式，使用脚本所在目录
+                    config_dir = Path(__file__).parent
+            else:
+                # 回退到使用 __file__ 的目录
+                config_dir = Path(__file__).parent
+                
         self.config_file = config_dir / 'filetreer_config.json'
     
     def to_dict(self) -> dict:
