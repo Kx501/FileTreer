@@ -49,13 +49,14 @@ jobs:
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
           PREV_TAG="${{ steps.previous-tag.outputs.previous_tag }}"
+          REPO_URL="${{ github.repository }}"
           
           if [ "${{ steps.previous-tag.outputs.is_first_release }}" == "true" ]; then
             # 首次发布，获取所有提交
-            COMMITS=$(git log --pretty=format:"- %s" --reverse)
+            COMMITS=$(git log --pretty=format:"- ([%h](https://github.com/${REPO_URL}/commit/%H)) %s" --reverse)
           else
             # 获取两个标签之间的提交
-            COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --pretty=format:"- %s" --reverse)
+            COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --pretty=format:"- ([%h](https://github.com/${REPO_URL}/commit/%H)) %s" --reverse)
           fi
           
           if [ -z "$COMMITS" ]; then
