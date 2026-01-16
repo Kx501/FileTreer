@@ -25,20 +25,30 @@ class FileTreeGenerator:
         if self._ignore_patterns is None:
             self._ignore_patterns = self.config.get_ignore_patterns_list()
             # 创建精确匹配的集合，用于快速查找
-            self._ignore_patterns_set = {p for p in self._ignore_patterns if '*' not in p and '?' not in p}
+            # 排除包含通配符的模式和以/结尾的目录匹配模式
+            self._ignore_patterns_set = {p for p in self._ignore_patterns 
+                                        if '*' not in p and '?' not in p and not p.endswith('/')}
         return self._ignore_patterns, self._ignore_patterns_set
     
-    def should_ignore(self, path: Path) -> bool:
+    def should_ignore(self, path: Path, is_dir: Optional[bool] = None) -> bool:
         """
         判断是否应该忽略该路径
         
         Args:
             path: 文件或文件夹路径
+            is_dir: 是否为目录，如果为None则自动检测
             
         Returns:
             True 如果应该忽略，False 否则
         """
         name = path.name
+        
+        # 如果未提供 is_dir，尝试检测（但可能不准确，建议在调用时提供）
+        if is_dir is None:
+            try:
+                is_dir = path.is_dir()
+            except OSError:
+                is_dir = False
         
         # 检查隐藏文件
         if self.config.ignore_hidden and name.startswith('.'):
@@ -47,15 +57,27 @@ class FileTreeGenerator:
         # 获取缓存的忽略清单
         ignore_patterns, ignore_patterns_set = self._get_ignore_patterns()
         
-        # 先检查精确匹配
+        # 先检查精确匹配（这些模式不包含通配符，也不以/结尾）
         if name in ignore_patterns_set:
             return True
         
-        # 再检查通配符匹配
+        # 再检查通配符匹配和目录匹配模式
         for pattern in ignore_patterns:
             if pattern not in ignore_patterns_set:  # 跳过已检查的精确匹配
-                if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(str(path), pattern):
-                    return True
+                # 检查是否为目录匹配模式（以/结尾）
+                if pattern.endswith('/'):
+                    # 目录匹配模式：只匹配目录
+                    if not is_dir:
+                        # 当前项不是目录，跳过该模式
+                        continue
+                    # 去掉末尾的/后进行匹配
+                    pattern_without_slash = pattern[:-1]
+                    if fnmatch.fnmatch(name, pattern_without_slash) or fnmatch.fnmatch(str(path), pattern_without_slash):
+                        return True
+                else:
+                    # 普通模式：匹配文件和目录
+                    if fnmatch.fnmatch(name, pattern) or fnmatch.fnmatch(str(path), pattern):
+                        return True
         
         return False
     
@@ -81,8 +103,8 @@ class FileTreeGenerator:
             with os.scandir(root_path) as it:
                 for entry in it:
                     entry_path = Path(entry.path)
-                    if not self.should_ignore(entry_path):
-                        is_dir = entry.is_dir()
+                    is_dir = entry.is_dir()
+                    if not self.should_ignore(entry_path, is_dir=is_dir):
                         entries.append((entry_path, is_dir))
             
             # 排序：目录在前，然后按名称排序
