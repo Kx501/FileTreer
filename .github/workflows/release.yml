@@ -1,0 +1,107 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag format
+        id: validate-tag
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          if [[ ! $TAG_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag format is invalid: $TAG_NAME"
+            echo "Expected format: vx.x.x (e.g., v1.0.0, v1.2.3)"
+            exit 1
+          fi
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Valid tag: $TAG_NAME"
+
+      - name: Get previous tag
+        id: previous-tag
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          # 获取所有标签并按版本号排序
+          PREV_TAG=$(git tag -l 'v*.*.*' | sort -V | grep -B1 "^${TAG_NAME}$" | head -n 1)
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" == "$TAG_NAME" ]; then
+            echo "previous_tag=" >> $GITHUB_OUTPUT
+            echo "is_first_release=true" >> $GITHUB_OUTPUT
+            echo "No previous tag found, this is the first release"
+          else
+            echo "previous_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+            echo "is_first_release=false" >> $GITHUB_OUTPUT
+            echo "Previous tag: $PREV_TAG"
+          fi
+
+      - name: Extract commit messages
+        id: commit-messages
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          PREV_TAG="${{ steps.previous-tag.outputs.previous_tag }}"
+          
+          if [ "${{ steps.previous-tag.outputs.is_first_release }}" == "true" ]; then
+            # 首次发布，获取所有提交
+            COMMITS=$(git log --pretty=format:"- %s" --reverse)
+          else
+            # 获取两个标签之间的提交
+            COMMITS=$(git log ${PREV_TAG}..${TAG_NAME} --pretty=format:"- %s" --reverse)
+          fi
+          
+          if [ -z "$COMMITS" ]; then
+            COMMITS="- 无变更记录"
+          fi
+          
+          # 使用多行输出
+          {
+            echo 'commit_messages<<EOF'
+            echo "$COMMITS"
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          {
+            echo 'release_notes<<EOF'
+            echo "###### 单文件版："
+            echo "- exe，体积更小"
+            echo "###### 独立目录版："
+            echo "- zip，启动速度更快"
+            echo ""
+            echo "**两种都会生成配置文件**"
+            echo ""
+            echo "## 变更记录"
+            echo ""
+            echo "${{ steps.commit-messages.outputs.commit_messages }}"
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
+      - name: Create release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = process.env.GITHUB_REF.replace('refs/tags/', '');
+            const releaseNotes = `${{ steps.release-notes.outputs.release_notes }}`;
+            
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName,
+              name: tagName,
+              body: releaseNotes,
+              draft: true,
+              prerelease: false
+            });
+            
+            console.log(`Created draft release: ${tagName}`);
